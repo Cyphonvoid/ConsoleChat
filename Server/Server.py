@@ -24,6 +24,7 @@ class Input():
         self.state.set_false()
 
 
+
 class MultiClientServer():
 
     def __init__(self):
@@ -61,7 +62,6 @@ class MultiClientServer():
                 
             
     def select_client(self, num):
-
         try:
             num = int(num)
             if(num > len(self.clients)-1 or num < 0):
@@ -88,17 +88,18 @@ class MultiClientServer():
         
     def send_message(self, message):
         if(len(self.clients) == 0):
-            print("[No Clients Available")
+            print("[No Clients Available]")
             return None
         
         if(self.current_client == None):
             print("[Current client is None and not selected..]")
             return None
         
-        if(message == 'exit'):
+        if(message == '-exit'):
             self.input.close()
             self.close()
             return None
+        
         try:
             if(self.current_client.state() == True):
                 success = self.current_client.send_message(message)
@@ -126,7 +127,7 @@ class MultiClientServer():
         message = None
         try:
             if(self.current_client.state() == True):
-                message = self.current_client.recieve_messae()
+                message = self.current_client.recieve_message()
                 if(message == ERROR.RECIEVER):
                     print("[Error recieved]:", ERROR.RECIEVER)
                     return False
@@ -193,9 +194,11 @@ class MultiClientServer():
                 self.send_all_flag = False
                 self.__clients()
                 continue
-            elif(val == 'close'):
+            
+            elif(val == '-close'):
                 self.__disconnect_client()
                 pass
+
             if(val == '-select all'):
                 self.send_all_flag = True
     
@@ -232,5 +235,5 @@ class MultiClientServer():
 
 
 server = MultiClientServer()
-server.run('192.168.1.222', 9999)
+server.run('192.168.1.222', 8888)
 server.close()
